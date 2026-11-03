@@ -124,7 +124,7 @@
 
     estado.textContent =
       "Pregunta " + pregunta + ": " + total +
-      " de 4 respuestas guardadas";
+      " de " + idsPermitidos.size + " respuestas guardadas";
   }
 
   campo.addEventListener("change", () => {
