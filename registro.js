@@ -3,7 +3,7 @@
   "use strict";
 
   const CLAVE = "lector_escolar_registro_v2";
-  const idsPermitidos = new Set([1, 2, 3, 4]);
+  const idsPermitidos = new Set([1, 2, 3, 4],5,6,7,8,9,10);
   const letras = ["A", "B", "C", "D"];
   const TIEMPO_CONFIRMACION = 1000;
 
