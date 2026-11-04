@@ -442,5 +442,124 @@ if (!camaraActiva) {
     );
   };
 
+  // MISION 28: IMPORTAR EXAMEN DESDE CHROMEBOOK
+
+  const bloqueImportar = document.createElement("div");
+  bloqueImportar.style.cssText =
+    "border:2px solid #164f91;padding:14px;" +
+    "border-radius:10px;margin-bottom:15px";
+
+  bloqueImportar.innerHTML = `
+    <h3>Importar examen desde Chromebook</h3>
+    <p>Selecciona el archivo JSON exportado
+    desde el administrador de exámenes.</p>
+    <input type="file" id="rex-importar"
+      accept=".json,application/json"
+      style="max-width:100%">
+    <p id="rex-importar-estado"></p>
+  `;
+
+  panel.prepend(bloqueImportar);
+
+  $("rex-importar").addEventListener(
+    "change", async evento => {
+
+    const archivo = evento.target.files[0];
+    if (!archivo) return;
+
+    try {
+      const nuevo = JSON.parse(await archivo.text());
+
+      if (
+        !nuevo ||
+        typeof nuevo.id !== "string" ||
+        !nuevo.id.trim() ||
+        typeof nuevo.nombre !== "string" ||
+        !nuevo.nombre.trim() ||
+        !Array.isArray(nuevo.preguntas) ||
+        nuevo.preguntas.length < 1 ||
+        nuevo.preguntas.length > 200
+      ) {
+        throw Error("El archivo no es un examen válido.");
+      }
+
+      const camposValidos = [
+        "Lenguajes",
+        "Saberes y Pensamiento Científico",
+        "Ética, Naturaleza y Sociedades",
+        "De lo Humano y lo Comunitario"
+      ];
+
+      for (const p of nuevo.preguntas) {
+        if (
+          !p ||
+          !camposValidos.includes(p.campo) ||
+          !["A","B","C","D"].includes(p.correcta) ||
+          typeof p.enunciado !== "string" ||
+          !p.enunciado.trim() ||
+          !p.opciones ||
+          ["A","B","C","D"].some(
+            letra =>
+              typeof p.opciones[letra] !== "string" ||
+              !p.opciones[letra].trim()
+          )
+        ) {
+          throw Error(
+            "El examen contiene preguntas inválidas."
+          );
+        }
+      }
+
+      const id = "importado_" + nuevo.id;
+
+      if (datos.examenes[id]) {
+        datos.activo = id;
+        pregunta = 1;
+        candidatos.clear();
+        $("rex-pregunta").value = 1;
+        guardar();
+        refrescarExamenes();
+
+        $("rex-importar-estado").textContent =
+          "Este examen ya estaba importado. " +
+          "Se conservaron sus respuestas.";
+        return;
+      }
+
+      const activoAnterior = datos.activo;
+
+      datos.examenes[id] = {
+        nombre: nuevo.nombre,
+        origenId: nuevo.id,
+        preguntas: nuevo.preguntas,
+        respuestas: {}
+      };
+
+      datos.activo = id;
+
+      if (!guardar()) {
+        delete datos.examenes[id];
+        datos.activo = activoAnterior;
+        throw Error("No se pudo guardar el examen.");
+      }
+
+      pregunta = 1;
+      candidatos.clear();
+      $("rex-pregunta").value = 1;
+
+      refrescarExamenes();
+
+      $("rex-importar-estado").textContent =
+        "Examen importado: " + nuevo.nombre +
+        " | Preguntas: " + nuevo.preguntas.length;
+
+    } catch (error) {
+      $("rex-importar-estado").textContent =
+        "Error: " + error.message;
+    } finally {
+      evento.target.value = "";
+    }
+  });
+
   refrescarExamenes();
 })();
