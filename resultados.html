@@ -1,0 +1,392 @@
+
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Resultados - Lector Escolar</title>
+<style>
+body {
+  font-family:system-ui,sans-serif;
+  max-width:1100px;
+  margin:auto;
+  padding:16px;
+  background:#f4f7fc;
+  color:#17243a;
+}
+h1,h2 {color:#164f91}
+.card {
+  background:white;
+  border-radius:12px;
+  padding:18px;
+  margin:16px 0;
+}
+input,button {
+  font:inherit;
+  padding:10px;
+  margin:8px 0;
+}
+input[type=file] {max-width:100%}
+button {
+  border:0;
+  border-radius:8px;
+  background:#164f91;
+  color:white;
+  cursor:pointer;
+}
+button:disabled {opacity:.5}
+.tablewrap {overflow-x:auto}
+table {
+  width:100%;
+  border-collapse:collapse;
+  font-size:14px;
+}
+th,td {
+  padding:9px;
+  border-bottom:1px solid #ddd;
+  text-align:center;
+}
+th {background:#eaf0fa}
+.izquierda {text-align:left}
+.ok {color:#167347;font-weight:700}
+.aviso {color:#a15b14}
+.error {color:#b42318}
+small {color:#526178}
+</style>
+</head>
+<body>
+
+<h1>📊 Sistema de Calificaciones Escolares</h1>
+<p>Evaluación por alumno y campo formativo · 34 tarjetas</p>
+
+<div class="card">
+  <h2>1. Cargar examen</h2>
+  <p>Selecciona el respaldo JSON del administrador.</p>
+  <input type="file" id="archivoExamen" accept=".json">
+  <p id="estadoExamen">Esperando examen...</p>
+</div>
+
+<div class="card">
+  <h2>2. Cargar respuestas</h2>
+  <p>Selecciona el CSV exportado desde Android.</p>
+  <input type="file" id="archivoRespuestas" accept=".csv,text/csv">
+  <p id="estadoRespuestas">Esperando respuestas...</p>
+</div>
+
+<div class="card">
+  <h2>3. Calcular resultados</h2>
+  <button id="calcular">Calcular calificaciones</button>
+  <button id="exportar" disabled>Exportar resultados CSV</button>
+  <p id="mensaje"></p>
+</div>
+
+<div class="card" id="panel" hidden>
+  <h2 id="titulo"></h2>
+  <p id="resumen"></p>
+  <p><small>
+    Calificación general sobre 10.
+    Todas las preguntas tienen el mismo valor.
+    Las preguntas sin respuesta cuentan como cero.
+  </small></p>
+
+  <div class="tablewrap">
+    <table>
+      <thead id="cabecera"></thead>
+      <tbody id="tabla"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const $ = id => document.getElementById(id);
+
+  const campos = [
+    "Lenguajes",
+    "Saberes y Pensamiento Científico",
+    "Ética, Naturaleza y Sociedades",
+    "De lo Humano y lo Comunitario"
+  ];
+
+  const abreviaturas = [
+    "Lenguajes",
+    "Saberes",
+    "Ética",
+    "Humano"
+  ];
+
+  let examen = null;
+  let respuestas = null;
+  let resultados = null;
+
+  function avisar(texto, error=false) {
+    $("mensaje").textContent = texto;
+    $("mensaje").className = error ? "error" : "ok";
+  }
+
+  function validarExamen(obj) {
+    if (!obj || !Array.isArray(obj.preguntas) ||
+        !obj.preguntas.length) {
+      throw Error("El JSON no contiene preguntas.");
+    }
+
+    for (const p of obj.preguntas) {
+      if (!campos.includes(p.campo) ||
+          !["A","B","C","D"].includes(p.correcta) ||
+          !p.enunciado || !p.opciones) {
+        throw Error("Hay preguntas incompletas o inválidas.");
+      }
+    }
+    return obj;
+  }
+
+  $("archivoExamen").addEventListener("change", async e => {
+    examen = null;
+    resultados = null;
+    $("panel").hidden = true;
+    $("exportar").disabled = true;
+
+    const archivo = e.target.files[0];
+    if (!archivo) return;
+
+    try {
+      examen = validarExamen(
+        JSON.parse(await archivo.text())
+      );
+      $("estadoExamen").textContent =
+        "Examen: " + examen.nombre +
+        " | Preguntas: " + examen.preguntas.length;
+    } catch (err) {
+      $("estadoExamen").textContent =
+        "Error: " + err.message;
+    }
+  });
+
+  $("archivoRespuestas").addEventListener("change", async e => {
+    respuestas = null;
+    resultados = null;
+    $("panel").hidden = true;
+    $("exportar").disabled = true;
+
+    const archivo = e.target.files[0];
+    if (!archivo) return;
+
+    try {
+      const texto = (await archivo.text())
+        .replace(/^\uFEFF/, "");
+
+      const lineas = texto.split(/\r?\n/)
+        .filter(linea => linea.trim());
+
+      const encabezado = lineas.shift()
+        ?.trim().toLowerCase().replace(/\s/g,"");
+
+      if (encabezado !== "pregunta,tarjeta,respuesta") {
+        throw Error("El CSV no tiene el formato esperado.");
+      }
+
+      const mapa = new Map();
+      let validas = 0;
+
+      for (const linea of lineas) {
+        const partes = linea.split(",");
+        if (partes.length !== 3) continue;
+
+        const pregunta = Number(partes[0].trim());
+        const tarjeta = Number(partes[1].trim());
+        const respuesta = partes[2].trim().toUpperCase();
+
+        if (!Number.isInteger(pregunta) || pregunta < 1 ||
+            !Number.isInteger(tarjeta) ||
+            tarjeta < 1 || tarjeta > 34 ||
+            !["A","B","C","D"].includes(respuesta)) {
+          continue;
+        }
+
+        mapa.set(pregunta + ":" + tarjeta, respuesta);
+        validas++;
+      }
+
+      respuestas = mapa;
+
+      $("estadoRespuestas").textContent =
+        "Archivo cargado: " + mapa.size +
+        " respuestas válidas y únicas.";
+
+      if (!validas) {
+        $("estadoRespuestas").textContent +=
+          " No hay respuestas para calificar.";
+      }
+    } catch (err) {
+      $("estadoRespuestas").textContent =
+        "Error: " + err.message;
+    }
+  });
+
+  function celda(fila, texto, esTitulo=false) {
+    const elemento = document.createElement(
+      esTitulo ? "th" : "td"
+    );
+    elemento.textContent = texto;
+    fila.appendChild(elemento);
+  }
+
+  $("calcular").onclick = () => {
+    if (!examen || !respuestas) {
+      avisar("Carga primero el examen JSON y el CSV.", true);
+      return;
+    }
+
+    const preguntas = examen.preguntas;
+    const porCampo = campos.map(campo =>
+      preguntas.filter(p => p.campo === campo)
+    );
+
+    resultados = [];
+
+    for (let alumno=1; alumno<=34; alumno++) {
+      let aciertos = 0;
+      let contestadas = 0;
+      const detalle = campos.map(() => ({
+        aciertos:0,
+        total:0
+      }));
+
+      preguntas.forEach((p, indice) => {
+        const respuesta = respuestas.get(
+          (indice + 1) + ":" + alumno
+        );
+
+        const campoIndice = campos.indexOf(p.campo);
+        detalle[campoIndice].total++;
+
+        if (respuesta) contestadas++;
+
+        if (respuesta === p.correcta) {
+          aciertos++;
+          detalle[campoIndice].aciertos++;
+        }
+      });
+
+      resultados.push({
+        alumno,
+        aciertos,
+        total:preguntas.length,
+        contestadas,
+        calificacion:10*aciertos/preguntas.length,
+        detalle
+      });
+    }
+
+    const cabecera = $("cabecera");
+    const tabla = $("tabla");
+    cabecera.replaceChildren();
+    tabla.replaceChildren();
+
+    const encabezado = document.createElement("tr");
+    [
+      "Tarjeta","Contestadas","Aciertos",
+      "Calificación",...abreviaturas
+    ].forEach(t => celda(encabezado,t,true));
+    cabecera.appendChild(encabezado);
+
+    for (const r of resultados) {
+      const fila = document.createElement("tr");
+
+      celda(fila,r.alumno);
+      celda(fila,r.contestadas + "/" + r.total);
+      celda(fila,r.aciertos + "/" + r.total);
+      celda(fila,r.calificacion.toFixed(2));
+
+      r.detalle.forEach(d => {
+        celda(fila,d.total
+          ? d.aciertos + "/" + d.total
+          : "N/A");
+      });
+
+      tabla.appendChild(fila);
+    }
+
+    const promedio = resultados.reduce(
+      (s,r) => s+r.calificacion,0
+    ) / resultados.length;
+
+    $("titulo").textContent = examen.nombre;
+
+    $("resumen").textContent =
+      "34 tarjetas | " + preguntas.length +
+      " preguntas | Promedio de las 34 tarjetas: " +
+      promedio.toFixed(2) +
+      " | Campos: " +
+      porCampo.map((p,i) =>
+        abreviaturas[i] + " (" + p.length + ")"
+      ).join(", ");
+
+    $("panel").hidden = false;
+    $("exportar").disabled = false;
+
+    avisar("Calificaciones calculadas correctamente.");
+  };
+
+  function csvValor(valor) {
+    const texto = String(valor);
+    return '"' + texto.replace(/"/g,'""') + '"';
+  }
+
+  $("exportar").onclick = () => {
+    if (!resultados) return;
+
+    const encabezados = [
+      "Tarjeta","Contestadas","Aciertos",
+      "Total preguntas","Calificacion 0-10"
+    ];
+
+    campos.forEach(campo => {
+      encabezados.push(campo + " aciertos");
+      encabezados.push(campo + " total");
+      encabezados.push(campo + " calificacion 0-10");
+    });
+
+    const filas = [encabezados];
+
+    for (const r of resultados) {
+      const fila = [
+        r.alumno,r.contestadas,r.aciertos,
+        r.total,r.calificacion.toFixed(2)
+      ];
+
+      r.detalle.forEach(d => {
+        fila.push(d.aciertos);
+        fila.push(d.total);
+        fila.push(d.total
+          ? (10*d.aciertos/d.total).toFixed(2)
+          : "");
+      });
+
+      filas.push(fila);
+    }
+
+    const contenido = "\uFEFF" + filas.map(
+      fila => fila.map(csvValor).join(",")
+    ).join("\r\n");
+
+    const blob = new Blob([contenido], {
+      type:"text/csv;charset=utf-8"
+    });
+
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "calificaciones_escolares.csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    setTimeout(() => URL.revokeObjectURL(url),1000);
+  };
+})();
+</script>
+</body>
+</html>
