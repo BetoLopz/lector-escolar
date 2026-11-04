@@ -1,0 +1,373 @@
+
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Administrador de Exámenes Escolares</title>
+<style>
+body {
+  font-family:system-ui,sans-serif;
+  max-width:950px;
+  margin:auto;
+  padding:16px;
+  background:#f4f7fc;
+  color:#17243a;
+}
+.card {
+  background:white;
+  border-radius:14px;
+  padding:20px;
+  margin:16px 0;
+  box-shadow:0 2px 9px #0001;
+}
+h1,h2 {color:#164f91}
+label {display:block;font-weight:600;margin-top:12px}
+input,select,textarea {
+  box-sizing:border-box;
+  width:100%;
+  padding:11px;
+  margin-top:5px;
+  border:1px solid #bac5d5;
+  border-radius:8px;
+  font:inherit;
+}
+textarea {min-height:80px}
+button {
+  background:#164f91;
+  color:white;
+  border:0;
+  border-radius:8px;
+  padding:11px 15px;
+  margin:6px 5px 6px 0;
+  cursor:pointer;
+}
+button:disabled {opacity:.5}
+.secundario {background:#64748b}
+.peligro {background:#b23a3a}
+.pregunta {
+  border:1px solid #d7dfeb;
+  padding:14px;
+  border-radius:10px;
+  margin:12px 0;
+}
+small {color:#536579}
+.opciones {display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media(max-width:600px){.opciones{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<h1>📚 Administrador de Exámenes Escolares</h1>
+<p>Exámenes de opción múltiple · Nueva Escuela Mexicana</p>
+
+<div class="card">
+  <h2>1. Mis exámenes</h2>
+  <label>Nombre del nuevo examen
+    <input id="nombre" placeholder="Ej. Evaluación del primer trimestre">
+  </label>
+  <button id="crear">Crear examen</button>
+  <label>Seleccionar examen
+    <select id="examenActual"></select>
+  </label>
+  <button id="exportar">Descargar respaldo JSON</button>
+  <button id="eliminarExamen" class="peligro">Eliminar examen</button>
+  <p id="estado"></p>
+</div>
+
+<div class="card" id="editor" hidden>
+  <h2>2. Agregar o editar pregunta</h2>
+  <form id="formPregunta">
+    <label>Campo formativo
+      <select id="campo" required>
+        <option>Lenguajes</option>
+        <option>Saberes y Pensamiento Científico</option>
+        <option>Ética, Naturaleza y Sociedades</option>
+        <option>De lo Humano y lo Comunitario</option>
+      </select>
+    </label>
+
+    <label>Pregunta
+      <textarea id="enunciado" required
+        placeholder="Escribe la pregunta"></textarea>
+    </label>
+
+    <div class="opciones">
+      <label>Opción A<input id="opA" required></label>
+      <label>Opción B<input id="opB" required></label>
+      <label>Opción C<input id="opC" required></label>
+      <label>Opción D<input id="opD" required></label>
+    </div>
+
+    <label>Respuesta correcta
+      <select id="correcta" required>
+        <option value="A">A</option>
+        <option value="B">B</option>
+        <option value="C">C</option>
+        <option value="D">D</option>
+      </select>
+    </label>
+
+    <button type="submit" id="guardarPregunta">
+      Guardar pregunta
+    </button>
+    <button type="button" id="cancelar" class="secundario">
+      Cancelar edición
+    </button>
+  </form>
+</div>
+
+<div class="card" id="listado" hidden>
+  <h2>3. Preguntas del examen</h2>
+  <p id="resumen"></p>
+  <div id="preguntas"></div>
+</div>
+
+<p><small>
+Los exámenes se guardan en este navegador.
+Exporta respaldos periódicamente.
+No publiques información personal de alumnos.
+</small></p>
+
+<script>
+(() => {
+  "use strict";
+
+  const CLAVE = "lector_escolar_examenes_v1";
+  const $ = id => document.getElementById(id);
+
+  let examenes = [];
+  let activo = "";
+  let editando = -1;
+
+  try {
+    const guardado = JSON.parse(localStorage.getItem(CLAVE) || "[]");
+    if (Array.isArray(guardado)) examenes = guardado;
+  } catch (error) {
+    alert("No se pudieron leer los exámenes guardados.");
+  }
+
+  function persistir() {
+    try {
+      localStorage.setItem(CLAVE, JSON.stringify(examenes));
+      return true;
+    } catch (error) {
+      alert("No se pudo guardar. Revisa el almacenamiento.");
+      return false;
+    }
+  }
+
+  function examen() {
+    return examenes.find(e => e.id === activo);
+  }
+
+  function limpiarFormulario() {
+    $("formPregunta").reset();
+    editando = -1;
+    $("guardarPregunta").textContent = "Guardar pregunta";
+  }
+
+  function renderizar() {
+    const selector = $("examenActual");
+    selector.replaceChildren();
+
+    if (!examenes.some(e => e.id === activo)) {
+      activo = examenes[0]?.id || "";
+    }
+
+    for (const e of examenes) {
+      const opcion = document.createElement("option");
+      opcion.value = e.id;
+      opcion.textContent = e.nombre;
+      selector.appendChild(opcion);
+    }
+
+    selector.value = activo;
+
+    const actual = examen();
+    $("editor").hidden = !actual;
+    $("listado").hidden = !actual;
+    $("exportar").disabled = !actual;
+    $("eliminarExamen").disabled = !actual;
+
+    $("estado").textContent = actual
+      ? "Examen seleccionado: " + actual.nombre
+      : "Crea tu primer examen para comenzar.";
+
+    const contenedor = $("preguntas");
+    contenedor.replaceChildren();
+    if (!actual) return;
+
+    const conteos = {};
+    for (const p of actual.preguntas) {
+      conteos[p.campo] = (conteos[p.campo] || 0) + 1;
+    }
+
+    $("resumen").textContent =
+      "Total: " + actual.preguntas.length +
+      " preguntas. " +
+      Object.entries(conteos)
+        .map(([campo,n]) => campo + ": " + n)
+        .join(" | ");
+
+    actual.preguntas.forEach((p, indice) => {
+      const div = document.createElement("div");
+      div.className = "pregunta";
+
+      const titulo = document.createElement("h3");
+      titulo.textContent = "Pregunta " + (indice + 1);
+      div.appendChild(titulo);
+
+      const campo = document.createElement("small");
+      campo.textContent = p.campo;
+      div.appendChild(campo);
+
+      const enunciado = document.createElement("p");
+      enunciado.textContent = p.enunciado;
+      div.appendChild(enunciado);
+
+      for (const letra of ["A","B","C","D"]) {
+        const opcion = document.createElement("p");
+        opcion.textContent = letra + ") " + p.opciones[letra];
+        div.appendChild(opcion);
+      }
+
+      const correcta = document.createElement("strong");
+      correcta.textContent = "Correcta: " + p.correcta;
+      div.appendChild(correcta);
+
+      const acciones = document.createElement("div");
+
+      const editar = document.createElement("button");
+      editar.textContent = "Editar";
+      editar.onclick = () => {
+        editando = indice;
+        $("campo").value = p.campo;
+        $("enunciado").value = p.enunciado;
+        for (const l of ["A","B","C","D"]) {
+          $("op" + l).value = p.opciones[l];
+        }
+        $("correcta").value = p.correcta;
+        $("guardarPregunta").textContent = "Actualizar pregunta";
+        $("editor").scrollIntoView();
+      };
+
+      const borrar = document.createElement("button");
+      borrar.textContent = "Eliminar";
+      borrar.className = "peligro";
+      borrar.onclick = () => {
+        if (!confirm("¿Eliminar la pregunta " + (indice + 1) + "?"))
+          return;
+        actual.preguntas.splice(indice, 1);
+        if (editando !== -1) limpiarFormulario();
+        persistir();
+        renderizar();
+      };
+
+      acciones.append(editar, borrar);
+      div.appendChild(acciones);
+      contenedor.appendChild(div);
+    });
+  }
+
+  $("crear").onclick = () => {
+    const nombre = $("nombre").value.trim();
+    if (!nombre) {
+      alert("Escribe un nombre para el examen.");
+      return;
+    }
+
+    const nuevo = {
+      id: "ex_" + Date.now() + "_" +
+        Math.random().toString(36).slice(2,8),
+      nombre,
+      preguntas: []
+    };
+
+    examenes.push(nuevo);
+    activo = nuevo.id;
+    $("nombre").value = "";
+    limpiarFormulario();
+    persistir();
+    renderizar();
+  };
+
+  $("examenActual").onchange = evento => {
+    activo = evento.target.value;
+    limpiarFormulario();
+    renderizar();
+  };
+
+  $("formPregunta").onsubmit = evento => {
+    evento.preventDefault();
+    const actual = examen();
+    if (!actual) return;
+
+    const p = {
+      campo: $("campo").value,
+      enunciado: $("enunciado").value.trim(),
+      opciones: {
+        A: $("opA").value.trim(),
+        B: $("opB").value.trim(),
+        C: $("opC").value.trim(),
+        D: $("opD").value.trim()
+      },
+      correcta: $("correcta").value
+    };
+
+    if (!p.enunciado ||
+        Object.values(p.opciones).some(v => !v)) {
+      alert("Completa la pregunta y sus cuatro opciones.");
+      return;
+    }
+
+    if (editando >= 0) {
+      actual.preguntas[editando] = p;
+    } else {
+      actual.preguntas.push(p);
+    }
+
+    persistir();
+    limpiarFormulario();
+    renderizar();
+  };
+
+  $("cancelar").onclick = limpiarFormulario;
+
+  $("eliminarExamen").onclick = () => {
+    const actual = examen();
+    if (!actual) return;
+    if (!confirm("¿Eliminar el examen y todas sus preguntas?"))
+      return;
+
+    examenes = examenes.filter(e => e.id !== activo);
+    activo = "";
+    limpiarFormulario();
+    persistir();
+    renderizar();
+  };
+
+  $("exportar").onclick = () => {
+    const actual = examen();
+    if (!actual) return;
+
+    const contenido = JSON.stringify(actual, null, 2);
+    const archivo = new Blob([contenido], {
+      type:"application/json"
+    });
+
+    const url = URL.createObjectURL(archivo);
+    const enlace = document.createElement("a");
+    enlace.href = url;
+    enlace.download = "respaldo_examen_escolar.json";
+    document.body.appendChild(enlace);
+    enlace.click();
+    enlace.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  renderizar();
+})();
+</script>
+</body>
+</html>
