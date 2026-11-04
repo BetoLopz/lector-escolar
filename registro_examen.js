@@ -561,5 +561,107 @@ if (!camaraActiva) {
     }
   });
 
+  // MISION 30: PREGUNTAS Y NAVEGACION
+
+  const vista = document.createElement("div");
+  vista.style.cssText =
+    "background:#eef4ff;padding:15px;" +
+    "border-radius:12px;margin:15px 0";
+
+  panel.prepend(vista);
+
+  function mostrarPregunta() {
+    vista.replaceChildren();
+
+    const examen = examenActual();
+    if (!examen) {
+      vista.textContent = "Selecciona un examen.";
+      return;
+    }
+
+    const preguntas = examen.preguntas;
+
+    if (!Array.isArray(preguntas) ||
+        preguntas.length === 0) {
+      vista.textContent =
+        "Este examen no tiene preguntas importadas.";
+      return;
+    }
+
+    const titulo = document.createElement("h3");
+    titulo.textContent = examen.nombre;
+    vista.appendChild(titulo);
+
+    const numero = document.createElement("p");
+    numero.textContent =
+      "Pregunta " + pregunta +
+      " de " + preguntas.length;
+    vista.appendChild(numero);
+
+    const p = preguntas[pregunta - 1];
+
+    if (p) {
+      const campo = document.createElement("small");
+      campo.textContent = p.campo;
+      vista.appendChild(campo);
+
+      const enunciado = document.createElement("h3");
+      enunciado.textContent = p.enunciado;
+      vista.appendChild(enunciado);
+
+      for (const letra of ["A","B","C","D"]) {
+        const opcion = document.createElement("p");
+        opcion.textContent =
+          letra + ") " + p.opciones[letra];
+        vista.appendChild(opcion);
+      }
+    } else {
+      const aviso = document.createElement("p");
+      aviso.textContent =
+        "Selecciona una pregunta válida del examen.";
+      vista.appendChild(aviso);
+    }
+
+    const anterior = document.createElement("button");
+    anterior.textContent = "← Anterior";
+    anterior.disabled = pregunta <= 1;
+
+    const siguiente = document.createElement("button");
+    siguiente.textContent = "Siguiente →";
+    siguiente.disabled = pregunta >= preguntas.length;
+
+    function cambiarPregunta(nuevoNumero) {
+      // Detener la cámara antes de cambiar de reactivo
+      document.getElementById("stop")?.click();
+
+      const entrada = $("rex-pregunta");
+      entrada.value = nuevoNumero;
+      entrada.dispatchEvent(new Event("change"));
+    }
+
+    anterior.onclick = () =>
+      cambiarPregunta(pregunta - 1);
+
+    siguiente.onclick = () =>
+      cambiarPregunta(pregunta + 1);
+
+    vista.append(anterior, siguiente);
+  }
+
+  // Actualizar la vista cuando cambian las respuestas,
+  // el examen seleccionado o la pregunta.
+
+  const observador = new MutationObserver(() => {
+    mostrarPregunta();
+  });
+
+  observador.observe($("rex-estado"), {
+    childList: true,
+    characterData: true,
+    subtree: true
+  });
+
+  mostrarPregunta();
+
   refrescarExamenes();
 })();
