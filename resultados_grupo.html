@@ -1,0 +1,428 @@
+
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Resultados por alumno - Lector Escolar</title>
+<style>
+body {
+  font-family:system-ui,sans-serif;
+  max-width:1200px;
+  margin:auto;
+  padding:16px;
+  background:#f4f7fc;
+  color:#17243a;
+}
+h1,h2 {color:#164f91}
+.card {
+  background:white;
+  border-radius:12px;
+  padding:18px;
+  margin:16px 0;
+}
+input[type=file] {width:100%;max-width:100%}
+label {display:block;margin:12px 0;font-weight:600}
+button {
+  padding:12px 17px;
+  border:0;
+  border-radius:8px;
+  background:#164f91;
+  color:white;
+  font:inherit;
+  cursor:pointer;
+}
+button:disabled {opacity:.5}
+table {
+  width:100%;
+  border-collapse:collapse;
+  font-size:13px;
+}
+th,td {
+  padding:9px;
+  border-bottom:1px solid #ddd;
+  text-align:center;
+}
+th {background:#eaf0fa}
+td.nombre {text-align:left}
+.tabla {overflow-x:auto}
+.ok {color:#167347}
+.error {color:#b42318}
+small {color:#526178}
+.resumen {font-weight:600}
+</style>
+</head>
+<body>
+
+<h1>📊 Resultados por alumno y campo formativo</h1>
+<p>Sistema de evaluación escolar · 34 tarjetas</p>
+
+<div class="card">
+  <h2>1. Cargar los tres archivos</h2>
+  <label>Registro del grupo (JSON)
+    <input id="grupo" type="file" accept=".json">
+  </label>
+  <label>Examen con respuestas correctas (JSON)
+    <input id="examen" type="file" accept=".json">
+  </label>
+  <label>Respuestas escaneadas (CSV)
+    <input id="respuestas" type="file" accept=".csv,text/csv">
+  </label>
+  <p id="estado">Selecciona los tres archivos.</p>
+  <button id="calcular">Calcular calificaciones</button>
+</div>
+
+<div id="reporte" class="card" hidden>
+  <h2 id="titulo">Resultados</h2>
+  <p id="resumen" class="resumen"></p>
+  <p><small>
+    Marca o desmarca "Presentó" según la asistencia real.
+    Un alumno presente sin respuestas obtiene cero.
+    Un alumno ausente no se incluye en el promedio.
+  </small></p>
+
+  <div class="tabla">
+    <table>
+      <thead>
+        <tr>
+          <th>Tarjeta</th>
+          <th>Alumno</th>
+          <th>Presentó</th>
+          <th>Respondidas</th>
+          <th>Aciertos</th>
+          <th>General /10</th>
+          <th>Lenguajes /10</th>
+          <th>Saberes /10</th>
+          <th>Ética /10</th>
+          <th>Humano /10</th>
+        </tr>
+      </thead>
+      <tbody id="tabla"></tbody>
+    </table>
+  </div>
+
+  <p><small>
+    N/A significa que el examen no contiene preguntas
+    de ese campo formativo.
+  </small></p>
+  <button id="exportar">Exportar reporte CSV</button>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const $ = id => document.getElementById(id);
+
+  const campos = [
+    "Lenguajes",
+    "Saberes y Pensamiento Científico",
+    "Ética, Naturaleza y Sociedades",
+    "De lo Humano y lo Comunitario"
+  ];
+
+  let filas = [];
+  let titulo = "";
+  let grupoNombre = "";
+
+  function mensaje(texto,error=false) {
+    $("estado").textContent = texto;
+    $("estado").className = error ? "error" : "ok";
+  }
+
+  async function leerJSON(id) {
+    const archivo = $(id).files[0];
+    if (!archivo) throw Error("Falta el archivo " + id);
+    return JSON.parse(await archivo.text());
+  }
+
+  async function leerCSV() {
+    const archivo = $("respuestas").files[0];
+    if (!archivo) throw Error("Falta el archivo CSV.");
+
+    const texto = (await archivo.text())
+      .replace(/^\uFEFF/,"");
+
+    const lineas = texto.split(/\r?\n/)
+      .filter(linea => linea.trim());
+
+    const cabecera = lineas.shift()
+      ?.toLowerCase().replace(/\s/g,"");
+
+    if (cabecera !== "pregunta,tarjeta,respuesta") {
+      throw Error("El CSV no tiene el formato esperado.");
+    }
+
+    const mapa = new Map();
+
+    for (const linea of lineas) {
+      const partes = linea.split(",");
+      if (partes.length !== 3) {
+        throw Error("Fila CSV inválida: " + linea);
+      }
+
+      const n = Number(partes[0].trim());
+      const id = Number(partes[1].trim());
+      const respuesta = partes[2].trim().toUpperCase();
+
+      if (!Number.isInteger(n) || n < 1 ||
+          !Number.isInteger(id) || id < 1 || id > 34 ||
+          !["A","B","C","D"].includes(respuesta)) {
+        throw Error("Respuesta CSV inválida.");
+      }
+
+      const clave = n + ":" + id;
+      if (mapa.has(clave)) {
+        throw Error("Respuesta duplicada: " + clave);
+      }
+      mapa.set(clave,respuesta);
+    }
+
+    return mapa;
+  }
+
+  function validarGrupo(grupo) {
+    if (!grupo || typeof grupo.nombre !== "string" ||
+        !Array.isArray(grupo.alumnos) ||
+        grupo.alumnos.length !== 34) {
+      throw Error("El grupo debe contener 34 tarjetas.");
+    }
+
+    for (let i=0;i<34;i++) {
+      const alumno = grupo.alumnos[i];
+      if (!alumno || alumno.tarjeta !== i+1 ||
+          typeof alumno.identificador !== "string") {
+        throw Error("Lista del grupo inválida.");
+      }
+    }
+  }
+
+  function validarExamen(examen) {
+    if (!examen || !Array.isArray(examen.preguntas) ||
+        examen.preguntas.length === 0) {
+      throw Error("El examen no contiene preguntas.");
+    }
+
+    examen.preguntas.forEach((p,i) => {
+      if (!p || !campos.includes(p.campo) ||
+          !["A","B","C","D"].includes(p.correcta)) {
+        throw Error("Pregunta inválida: " + (i+1));
+      }
+    });
+  }
+
+  function nota(aciertos,total) {
+    return total ? (10*aciertos/total).toFixed(2) : "N/A";
+  }
+
+  function calcularFila(alumno,preguntas,respuestas) {
+    const id = alumno.tarjeta;
+    let respondidas = 0;
+    let aciertos = 0;
+
+    const detalles = campos.map(() => ({
+      aciertos:0,total:0
+    }));
+
+    preguntas.forEach((p,i) => {
+      const respuesta = respuestas.get((i+1)+":"+id);
+      const c = campos.indexOf(p.campo);
+      detalles[c].total++;
+
+      if (respuesta) respondidas++;
+
+      if (respuesta === p.correcta) {
+        aciertos++;
+        detalles[c].aciertos++;
+      }
+    });
+
+    return {
+      tarjeta:id,
+      nombre:alumno.identificador,
+      presento:respondidas > 0,
+      respondidas,
+      aciertos,
+      total:preguntas.length,
+      detalles
+    };
+  }
+
+  function td(tr,texto,clase="") {
+    const c = document.createElement("td");
+    c.textContent = texto;
+    if (clase) c.className = clase;
+    tr.appendChild(c);
+    return c;
+  }
+
+  function actualizar() {
+    const cuerpo = $("tabla");
+    cuerpo.replaceChildren();
+
+    let presentes = 0;
+    let ausentes = 0;
+    let suma = 0;
+
+    filas.forEach(f => {
+      const tr = document.createElement("tr");
+
+      td(tr,f.tarjeta);
+      td(tr,f.nombre,"nombre");
+
+      const asistencia = document.createElement("td");
+      const check = document.createElement("input");
+      check.type = "checkbox";
+      check.checked = f.presento;
+      check.setAttribute(
+        "aria-label","Presentó tarjeta "+f.tarjeta
+      );
+      check.onchange = () => {
+        f.presento = check.checked;
+        actualizar();
+      };
+      asistencia.appendChild(check);
+      tr.appendChild(asistencia);
+
+      td(tr,f.presento ? f.respondidas+"/"+f.total : "—");
+      td(tr,f.presento ? f.aciertos+"/"+f.total : "—");
+
+      if (f.presento) {
+        presentes++;
+        const valor = 10*f.aciertos/f.total;
+        suma += valor;
+        td(tr,valor.toFixed(2));
+      } else {
+        ausentes++;
+        td(tr,"Ausente");
+      }
+
+      f.detalles.forEach(d => {
+        td(tr,f.presento ? nota(d.aciertos,d.total) : "—");
+      });
+
+      cuerpo.appendChild(tr);
+    });
+
+    const promedio = presentes
+      ? (suma/presentes).toFixed(2)
+      : "N/A";
+
+    $("resumen").textContent =
+      "Grupo: " + grupoNombre +
+      " | Presentaron: " + presentes +
+      " | Ausentes: " + ausentes +
+      " | Promedio general: " + promedio;
+  }
+
+  $("calcular").onclick = async () => {
+    try {
+      const grupo = await leerJSON("grupo");
+      const examen = await leerJSON("examen");
+      const respuestas = await leerCSV();
+
+      validarGrupo(grupo);
+      validarExamen(examen);
+
+      if (respuestas.size === 0) {
+        throw Error("El CSV no contiene respuestas.");
+      }
+
+      const fuera = [...respuestas.keys()]
+        .some(clave =>
+          Number(clave.split(":")[0]) >
+          examen.preguntas.length
+        );
+
+      if (fuera) {
+        throw Error(
+          "El CSV contiene preguntas que no están " +
+          "en este examen. Exporta una sesión " +
+          "que corresponda al examen seleccionado."
+        );
+      }
+
+      filas = grupo.alumnos.map(a =>
+        calcularFila(a,examen.preguntas,respuestas)
+      );
+
+      titulo = examen.nombre || "Examen escolar";
+      grupoNombre = grupo.nombre;
+
+      $("titulo").textContent = titulo;
+      $("reporte").hidden = false;
+      actualizar();
+      mensaje("Reporte calculado correctamente.");
+
+    } catch (error) {
+      $("reporte").hidden = true;
+      filas = [];
+      mensaje("Error: " + error.message,true);
+    }
+  };
+
+  function csvCelda(valor) {
+    return '"' + String(valor)
+      .replace(/"/g,'""') + '"';
+  }
+
+  $("exportar").onclick = () => {
+    if (!filas.length) return;
+
+    const cabeceras = [
+      "Tarjeta","Identificador","Grupo","Examen",
+      "Asistencia","Respondidas","Aciertos",
+      "Total","Calificacion general"
+    ];
+
+    campos.forEach(c => {
+      cabeceras.push(c+" aciertos");
+      cabeceras.push(c+" total");
+      cabeceras.push(c+" calificacion");
+    });
+
+    const datos = [cabeceras];
+
+    filas.forEach(f => {
+      const presente = f.presento;
+      const fila = [
+        f.tarjeta,f.nombre,grupoNombre,titulo,
+        presente ? "Presente" : "Ausente",
+        presente ? f.respondidas : "",
+        presente ? f.aciertos : "",
+        f.total,
+        presente ? nota(f.aciertos,f.total) : ""
+      ];
+
+      f.detalles.forEach(d => {
+        fila.push(presente ? d.aciertos : "");
+        fila.push(d.total);
+        fila.push(presente && d.total
+          ? nota(d.aciertos,d.total) : "");
+      });
+
+      datos.push(fila);
+    });
+
+    const contenido = "\uFEFF" +
+      datos.map(f => f.map(csvCelda).join(","))
+        .join("\r\n");
+
+    const archivo = new Blob([contenido],{
+      type:"text/csv;charset=utf-8"
+    });
+
+    const url = URL.createObjectURL(archivo);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "reporte_calificaciones_grupo.csv";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  };
+})();
+</script>
+</body>
+</html>
