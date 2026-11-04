@@ -1,0 +1,290 @@
+
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Registro del Grupo - Lector Escolar</title>
+<style>
+body {
+  font-family:system-ui,sans-serif;
+  background:#f4f7fc;
+  color:#17243a;
+  max-width:850px;
+  margin:auto;
+  padding:16px;
+}
+h1,h2 {color:#164f91}
+.card {
+  background:white;
+  border-radius:12px;
+  padding:18px;
+  margin:16px 0;
+}
+table {width:100%;border-collapse:collapse}
+th,td {
+  border-bottom:1px solid #ddd;
+  padding:9px;
+  text-align:left;
+}
+input {
+  box-sizing:border-box;
+  padding:10px;
+  font:inherit;
+  border:1px solid #bac5d5;
+  border-radius:7px;
+}
+input[type=text] {width:100%}
+input[type=file] {max-width:100%}
+button {
+  padding:11px 15px;
+  margin:5px;
+  background:#164f91;
+  color:white;
+  border:0;
+  border-radius:8px;
+  cursor:pointer;
+}
+small {color:#536579}
+#estado {font-weight:bold;color:#167347}
+</style>
+</head>
+<body>
+
+<h1>👩‍🏫 Registro de Grupo Escolar</h1>
+<p>Administración de tarjetas del 1 al 34</p>
+
+<div class="card">
+  <h2>Datos del grupo</h2>
+  <label>Nombre del grupo</label>
+  <input type="text" id="grupo"
+    value="6° A" maxlength="60">
+  <p><small>
+    Utiliza identificadores o seudónimos durante las pruebas.
+    Evita escribir datos personales en GitHub.
+  </small></p>
+</div>
+
+<div class="card">
+  <h2>Asignación de tarjetas</h2>
+  <p>Cada tarjeta corresponde a un alumno.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Tarjeta</th>
+        <th>Identificador del alumno</th>
+      </tr>
+    </thead>
+    <tbody id="alumnos"></tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Guardar y respaldar</h2>
+  <button id="guardar">Guardar grupo</button>
+  <button id="exportar">Exportar respaldo JSON</button>
+  <button id="csv">Exportar lista CSV</button>
+  <p id="estado">Preparando...</p>
+  <p><small>
+    El guardado se realiza en este navegador.
+    El respaldo JSON permite recuperar esta lista.
+    No elimines los datos de Chrome sin guardar
+    una copia de seguridad.
+  </small></p>
+</div>
+
+<div class="card">
+  <h2>Restaurar respaldo</h2>
+  <input type="file" id="importar" accept=".json">
+  <p><small>
+    Selecciona un respaldo exportado desde esta
+    página. La importación sustituye la lista actual.
+  </small></p>
+</div>
+
+<script>
+(() => {
+  "use strict";
+
+  const CLAVE = "lector_escolar_grupo_v1";
+  const $ = id => document.getElementById(id);
+
+  function grupoInicial() {
+    return {
+      nombre:"6° A",
+      alumnos:Array.from({length:34},(_,i)=>({
+        tarjeta:i+1,
+        identificador:"Alumno " +
+          String(i+1).padStart(2,"0")
+      }))
+    };
+  }
+
+  let datos = grupoInicial();
+
+  try {
+    const anterior = JSON.parse(
+      localStorage.getItem(CLAVE) || "null"
+    );
+    if (validar(anterior)) datos = anterior;
+  } catch (e) {
+    console.warn("No se pudo recuperar el grupo.");
+  }
+
+  function validar(obj) {
+    return obj &&
+      typeof obj.nombre === "string" &&
+      Array.isArray(obj.alumnos) &&
+      obj.alumnos.length === 34 &&
+      obj.alumnos.every((a,i) =>
+        a.tarjeta === i+1 &&
+        typeof a.identificador === "string"
+      );
+  }
+
+  function mostrar() {
+    $("grupo").value = datos.nombre;
+    const tabla = $("alumnos");
+    tabla.replaceChildren();
+
+    datos.alumnos.forEach((a,i) => {
+      const fila = document.createElement("tr");
+
+      const numero = document.createElement("td");
+      numero.textContent = a.tarjeta;
+
+      const espacio = document.createElement("td");
+      const entrada = document.createElement("input");
+
+      entrada.type = "text";
+      entrada.maxLength = 100;
+      entrada.value = a.identificador;
+      entrada.dataset.indice = i;
+      entrada.setAttribute(
+        "aria-label","Identificador tarjeta "+a.tarjeta
+      );
+
+      entrada.addEventListener("change", guardar);
+
+      espacio.appendChild(entrada);
+      fila.append(numero,espacio);
+      tabla.appendChild(fila);
+    });
+
+    $("estado").textContent = "Lista preparada: 34 tarjetas";
+  }
+
+  function recoger() {
+    datos.nombre = $("grupo").value.trim();
+
+    document.querySelectorAll(
+      "#alumnos input"
+    ).forEach(input => {
+      const i = Number(input.dataset.indice);
+      datos.alumnos[i].identificador =
+        input.value.trim();
+    });
+  }
+
+  function guardar() {
+    recoger();
+
+    try {
+      localStorage.setItem(
+        CLAVE,JSON.stringify(datos)
+      );
+      $("estado").textContent =
+        "Grupo guardado correctamente.";
+      return true;
+    } catch (e) {
+      $("estado").textContent =
+        "Error al guardar. Revisa el almacenamiento.";
+      return false;
+    }
+  }
+
+  function descargar(nombre,contenido,tipo) {
+    const blob = new Blob([contenido],{type:tipo});
+    const url = URL.createObjectURL(blob);
+
+    const enlace = document.createElement("a");
+    enlace.href = url;
+    enlace.download = nombre;
+    document.body.appendChild(enlace);
+    enlace.click();
+    enlace.remove();
+
+    setTimeout(()=>URL.revokeObjectURL(url),1000);
+  }
+
+  $("guardar").onclick = guardar;
+
+  $("grupo").addEventListener("change",guardar);
+
+  $("exportar").onclick = () => {
+    if (!guardar()) return;
+
+    descargar(
+      "respaldo_grupo_escolar.json",
+      JSON.stringify(datos,null,2),
+      "application/json"
+    );
+  };
+
+  function csvCelda(valor) {
+    return '"' + String(valor)
+      .replace(/"/g,'""') + '"';
+  }
+
+  $("csv").onclick = () => {
+    if (!guardar()) return;
+
+    const filas = [
+      ["Tarjeta","Identificador","Grupo"],
+      ...datos.alumnos.map(a=>[
+        a.tarjeta,a.identificador,datos.nombre
+      ])
+    ];
+
+    const contenido = "\uFEFF" +
+      filas.map(f=>f.map(csvCelda).join(","))
+        .join("\r\n");
+
+    descargar(
+      "lista_grupo_escolar.csv",
+      contenido,
+      "text/csv;charset=utf-8"
+    );
+  };
+
+  $("importar").addEventListener("change",async e=>{
+    const archivo = e.target.files[0];
+    if (!archivo) return;
+
+    try {
+      const nuevo = JSON.parse(await archivo.text());
+
+      if (!validar(nuevo)) {
+        throw Error("El archivo no contiene 34 tarjetas válidas.");
+      }
+
+      if (!confirm(
+        "¿Sustituir la lista actual por el respaldo?"
+      )) return;
+
+      datos = nuevo;
+      mostrar();
+      guardar();
+
+    } catch (error) {
+      alert("No se pudo importar: "+error.message);
+    }
+
+    e.target.value = "";
+  });
+
+  mostrar();
+})();
+</script>
+</body>
+</html>
