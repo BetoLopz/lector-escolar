@@ -108,6 +108,19 @@
 
   contenedor.insertAdjacentElement("afterend", panel);
 
+  const zonaFinalizar = document.createElement("div");
+  zonaFinalizar.style.marginTop = "15px";
+
+  zonaFinalizar.innerHTML = `
+    <button id="rex-finalizar"
+      style="background:#a33434">
+      Finalizar examen
+    </button>
+    <p id="rex-cierre-estado"></p>
+  `;
+
+  panel.appendChild(zonaFinalizar);
+
   const $ = id => document.getElementById(id);
 
   function clave(id) {
@@ -145,7 +158,21 @@
 
     $("rex-pregunta").disabled = !activo;
     $("rex-csv").disabled = !activo;
-    $("rex-borrar").disabled = !activo;
+    
+    const cerrado = Boolean(examen?.finalizado);
+
+    $("rex-borrar").disabled = !activo || cerrado;
+    $("rex-finalizar").disabled = !activo || cerrado;
+    $("start").disabled = !activo || cerrado;
+
+    $("rex-finalizar").textContent = cerrado
+      ? "Examen finalizado"
+      : "Finalizar examen";
+
+    $("rex-cierre-estado").textContent = cerrado
+      ? "Evaluación cerrada. Respuestas protegidas."
+      : "Evaluación disponible para registrar respuestas.";
+
 
     if (!examen) {
       $("rex-estado").textContent =
@@ -182,8 +209,9 @@
       });
 
       selector.value = valor;
-
+selector.disabled = Boolean(examen.finalizado);
       selector.onchange = () => {
+        if (examen.finalizado) return;
         const anterior = examen.respuestas[key];
 
         if (selector.value) {
@@ -285,8 +313,14 @@ if (!camaraActiva) {
   candidatos.clear();
   return;
 }
+    
     const examen = examenActual();
-    if (!examen) return;
+
+    if (!examen || examen.finalizado) {
+      candidatos.clear();
+      return;
+    }
+
 
     const visibles = new Map();
 
@@ -356,7 +390,7 @@ if (!camaraActiva) {
 
   $("rex-borrar").onclick = () => {
     const examen = examenActual();
-    if (!examen) return;
+    if (!examen || examen.finalizado) return;
 
     if (!confirm(
       "¿Borrar las respuestas de la pregunta " +
@@ -662,6 +696,43 @@ if (!camaraActiva) {
   });
 
   mostrarPregunta();
+
+  // MISION 34: FINALIZAR EXAMEN
+
+  $("rex-finalizar").onclick = () => {
+    const examen = examenActual();
+
+    if (!examen || examen.finalizado) return;
+
+    const confirmar = confirm(
+      "¿Finalizar el examen " + examen.nombre +
+      "?\n\nSe bloquearán las respuestas y " +
+      "no podrás modificarlas desde este lector."
+    );
+
+    if (!confirmar) return;
+
+    // Detener la cámara
+    $("stop").click();
+    candidatos.clear();
+
+    // Marcar el examen como finalizado
+    examen.finalizado = new Date().toISOString();
+
+    if (!guardar()) {
+      delete examen.finalizado;
+      refrescarTabla();
+      alert("No se pudo finalizar. Intenta nuevamente.");
+      return;
+    }
+
+    refrescarTabla();
+
+    alert(
+      "Examen finalizado correctamente.\n" +
+      "Exporta el CSV y el respaldo JSON."
+    );
+  };
 
   refrescarExamenes();
 })();
