@@ -140,7 +140,11 @@
          Object.entries(datos.examenes)) {
       const opcion = document.createElement("option");
       opcion.value = id;
-      opcion.textContent = examen.nombre;
+      
+opcion.textContent = examen.finalizado
+  ? "🔒 FINALIZADO - " + examen.nombre
+  : "🟢 ABIERTO - " + examen.nombre;
+
       selector.appendChild(opcion);
     }
 
