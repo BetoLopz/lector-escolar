@@ -130,11 +130,27 @@ small {color:#526178}
     $("estado").className = error ? "error" : "ok";
   }
 
-  async function leerJSON(id) {
-    const archivo = $(id).files[0];
-    if (!archivo) throw Error("Falta el archivo " + id);
+  
+async function leerJSON(id) {
+  const archivo = $(id).files[0];
+  const clave = "lector_escolar_cache_" + id;
+
+  if (archivo) {
     return JSON.parse(await archivo.text());
   }
+
+  const guardado = localStorage.getItem(clave);
+
+  if (guardado) {
+    return JSON.parse(guardado);
+  }
+
+  throw Error(
+    "Selecciona el archivo " + id +
+    " por primera vez."
+  );
+}
+
 
   async function leerCSV() {
     const archivo = $("respuestas").files[0];
@@ -323,6 +339,27 @@ small {color:#526178}
 
       validarGrupo(grupo);
       validarExamen(examen);
+
+try {
+  if ($("grupo").files.length) {
+    localStorage.setItem(
+      "lector_escolar_cache_grupo",
+      JSON.stringify(grupo)
+    );
+  }
+
+  if ($("examen").files.length) {
+    localStorage.setItem(
+      "lector_escolar_cache_examen",
+      JSON.stringify(examen)
+    );
+  }
+} catch (error) {
+  console.warn(
+    "No se pudieron conservar los archivos:",
+    error
+  );
+}
 
       if (respuestas.size === 0) {
         throw Error("El CSV no contiene respuestas.");
